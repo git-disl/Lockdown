@@ -15,7 +15,7 @@ The following figure illustrates the overall process.
 * TorchVision
 
 ## Data  preparation
-Dataset Fasionmnist and CIFAR10/100 will be automatically downloaded with TorchVision.
+Dataset FashionMnist and CIFAR10/100 will be automatically downloaded with TorchVision.
 
 ## Command to run
 The following code run lockdown in its default setting
