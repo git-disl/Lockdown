@@ -20,9 +20,7 @@ class Aggregation():
         
          
     def aggregate_updates(self, global_model, agent_updates_dict, cur_round, masks=None, agent_updates_dict_prev=None,mask_aggrement=None):
-        # adjust LR if robust LR is selected
         lr_vector = torch.Tensor([self.server_lr]*self.n_params).to(self.args.device)
-        # if self.args.lockdown > 0:
         if self.args.method != "rlr":
             lr_vector=lr_vector
         else:
@@ -44,22 +42,7 @@ class Aggregation():
         vector_to_model(new_global_params, global_model)
         return    None, None,None
 
-    # def compute_robustLR_temporal(self, agent_updates_dict, agent_updates_dict_previous):
-    #     new_agent_update_dict=copy.deepcopy(agent_updates_dict)
-    #     server_update = sum([ agent_updates_dict[id] for  id in agent_updates_dict])
-    #     if agent_updates_dict_previous!=None and len(agent_updates_dict_previous)>0:
-    #         for agent_id in agent_updates_dict:
-    #             update = agent_updates_dict[agent_id]
-    #             update_prev = agent_updates_dict_previous[agent_id]
-    #             print(torch.sum(update*server_update)/(torch.norm(update)*torch.norm(server_update)))
-    #             if torch.sum(update*server_update)/(torch.norm(update)*torch.norm(server_update))>0:
-    #                 new_agent_update_dict[agent_id] = update
-    #             else:
-    #                 new_agent_update_dict[agent_id] = update
-    #         return  new_agent_update_dict , None
-    #     else:
-    #         return  agent_updates_dict, None
-    
+
     def compute_robustLR(self, agent_updates_dict):
 
         agent_updates_sign = [torch.sign(update) for update in agent_updates_dict.values()]  
