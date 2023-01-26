@@ -1,10 +1,10 @@
 
 
 # Lockdown: Backdoor Defense for Federated Learning with Isolated Training Subspace
-This is the repo for the paper "Lockdown: Backdoor Defense for Federated Learning with Isolated Training Subspace".
+This is the repo for the paper "Lockdown: Backdoor Defense for Federated Learning with Isolated Subspace Training".
 
 ## Algorithm overview
-The overall procedure can be summarized into four main steps. i) Subspace training. ii)Subspace searching. iii) Aggregation. iv) Model cleaning with consensus fusion.
+The overall procedure can be summarized into four main steps. i) Isolated subspace training. ii)Subspace searching. iii) Aggregation. iv) Model cleaning with consensus fusion.
 The following figure illustrates the overall process. 
 <div align=center><img width="750" height="500" src="https://github.com/LockdownAuthor/Lockdown/blob/main/materials/system.png"/></div>
 
