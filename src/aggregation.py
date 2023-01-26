@@ -48,10 +48,10 @@ class Aggregation():
         agent_updates_sign = [torch.sign(update) for update in agent_updates_dict.values()]  
         sm_of_signs = torch.abs(sum(agent_updates_sign))
         mask=torch.zeros_like(sm_of_signs)
-        mask[sm_of_signs < self.args.lockdown] = 0
-        mask[sm_of_signs >= self.args.lockdown] = 1
-        sm_of_signs[sm_of_signs < self.args.lockdown] = -self.server_lr
-        sm_of_signs[sm_of_signs >= self.args.lockdown] = self.server_lr
+        mask[sm_of_signs < self.args.theta] = 0
+        mask[sm_of_signs >= self.args.theta] = 1
+        sm_of_signs[sm_of_signs < self.args.theta] = -self.server_lr
+        sm_of_signs[sm_of_signs >= self.args.theta] = self.server_lr
         return sm_of_signs.to(self.args.device), mask
 
     # def compute_robustLR_masks(self, agent_updates_dict, masks):
