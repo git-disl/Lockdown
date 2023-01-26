@@ -1,6 +1,6 @@
 
 
-# Lockdown: Backdoor Defense for Federated Learning with Isolated Training Subspace
+# Lockdown: Backdoor Defense for Federated Learning with Isolated Subspace Training
 This is the repo for the paper "Lockdown: Backdoor Defense for Federated Learning with Isolated Subspace Training".
 
 ## Algorithm overview
