@@ -1,9 +1,13 @@
+import copy
+import math
 import time
 
 import torch
+import models
 import utils
-from torch.nn.utils import parameters_to_vector
+from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.utils.data import DataLoader
+import torch.nn as nn
 
 
 class Agent():
@@ -20,33 +24,42 @@ class Agent():
                 utils.poison_dataset(self.train_dataset, args, data_idxs, agent_idx=self.id)
 
         else:
-            if self.args.data!= "tinyimagenet":
+            if self.args.data != "tinyimagenet":
+
                 self.train_dataset = utils.DatasetSplit(train_dataset, data_idxs)
                 # for backdoor attack, agent poisons his local dataset
                 if self.id < args.num_corrupt:
+                    self.clean_backup_dataset = copy.deepcopy(train_dataset)
+                    self.data_idxs = data_idxs
                     utils.poison_dataset(train_dataset, args, data_idxs, agent_idx=self.id)
             else:
-                self.train_dataset = utils.DatasetSplit(train_dataset, data_idxs, runtime_poison=True, args=args, client_id =id)
+                self.train_dataset = utils.DatasetSplit(train_dataset, data_idxs, runtime_poison=True, args=args,
+                                                        client_id=id)
         # get dataloader
         self.train_loader = DataLoader(self.train_dataset, batch_size=self.args.bs, shuffle=True, \
-                                       num_workers=args.num_workers, pin_memory=False , drop_last=True)
+                                       num_workers=args.num_workers, pin_memory=False, drop_last=True)
         # size of local dataset
         self.n_data = len(self.train_dataset)
 
+    def check_poison_timing(self, round):
+        if round > self.args.cease_poison:
+            self.train_dataset = utils.DatasetSplit(self.clean_backup_dataset, self.data_idxs)
+            self.train_loader = DataLoader(self.train_dataset, batch_size=self.args.bs, shuffle=True, \
+                                           num_workers=self.args.num_workers, pin_memory=False, drop_last=True)
 
-
-
-
-    def local_train(self, global_model, criterion, round=None):
+    def local_train(self, global_model, criterion, round=None, neurotoxin_mask=None):
         """ Do a local training over the received global model, return the update """
-        initial_global_model_params = parameters_to_vector([ global_model.state_dict()[name] for name in global_model.state_dict()]).detach()
+        initial_global_model_params = parameters_to_vector(
+            [global_model.state_dict()[name] for name in global_model.state_dict()]).detach()
         # initial_global_model_params_local = parameters_to_vector(global_model.parameters()).detach()
         # if  self.id<self.args.num_corrupt and self.mask_update!= None:
         #     initial_global_model_params_local = self.mask_update.to(self.args.device) + initial_global_model_params.to(self.args.device) * (1-self.previous_mask.to(self.args.device))
         #     vector_to_parameters(initial_global_model_params_local, global_model.parameters())
-
+        if self.id < self.args.num_corrupt:
+            self.check_poison_timing(round)
         global_model.train()
-        optimizer = torch.optim.SGD(global_model.parameters(), lr=self.args.client_lr* (self.args.lr_decay)**round, weight_decay=self.args.wd)
+        optimizer = torch.optim.SGD(global_model.parameters(), lr=self.args.client_lr * (self.args.lr_decay) ** round,
+                                    weight_decay=self.args.wd)
         for _ in range(self.args.local_ep):
             start = time.time()
             for _, (inputs, labels) in enumerate(self.train_loader):
@@ -56,11 +69,16 @@ class Agent():
                 outputs = global_model(inputs)
                 minibatch_loss = criterion(outputs, labels)
                 minibatch_loss.backward()
+                if self.args.attack == "neurotoxin" and len(neurotoxin_mask) and self.id < self.args.num_corrupt:
+                    for name, param in global_model.named_parameters():
+                        param.grad.data = neurotoxin_mask[name].to(self.args.device) * param.grad.data
                 optimizer.step()
+
             end = time.time()
-            print(end-start)
+            print(end - start)
 
         with torch.no_grad():
-            after_train = parameters_to_vector([ global_model.state_dict()[name] for name in global_model.state_dict()]).detach()
-            self.update = after_train- initial_global_model_params
+            after_train = parameters_to_vector(
+                [global_model.state_dict()[name] for name in global_model.state_dict()]).detach()
+            self.update = after_train - initial_global_model_params
             return self.update

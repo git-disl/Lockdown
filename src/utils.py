@@ -9,6 +9,8 @@ from torchvision import datasets, transforms
 from math import floor
 from collections import defaultdict
 import random
+import math
+
 
 class H5Dataset(Dataset):
     def __init__(self, dataset, client_id):
@@ -40,30 +42,30 @@ class H5Dataset(Dataset):
 class DatasetSplit(Dataset):
     """ An abstract Dataset class wrapped around Pytorch Dataset class """
 
-    def __init__(self, dataset, idxs,runtime_poison=False, args=None, client_id =-1, modify_label =True):
+    def __init__(self, dataset, idxs, runtime_poison=False, args=None, client_id=-1, modify_label=True):
         self.dataset = dataset
         self.idxs = idxs
         self.targets = torch.Tensor([self.dataset.targets[idx] for idx in idxs])
-        self.runtime_poison=runtime_poison
+        self.runtime_poison = runtime_poison
         self.args = args
-        self.client_id =client_id
+        self.client_id = client_id
         self.modify_label = modify_label
         if client_id == -1:
-            poison_frac =1
-        elif client_id< self.args.num_corrupt:
+            poison_frac = 1
+        elif client_id < self.args.num_corrupt:
             poison_frac = self.args.poison_frac
         else:
-            poison_frac =0
+            poison_frac = 0
         self.poison_sample = {}
-        self.poison_idxs= []
-        if runtime_poison and poison_frac>0:
+        self.poison_idxs = []
+        if runtime_poison and poison_frac > 0:
             self.poison_idxs = random.sample(self.idxs, floor(poison_frac * len(self.idxs)))
             for idx in self.poison_idxs:
-                self.poison_sample[idx]  = add_pattern_bd(copy.deepcopy(self.dataset[idx][0]), None, args.data, pattern_type=args.pattern_type, agent_idx=client_id,
-                               attack=args.attack)
+                self.poison_sample[idx] = add_pattern_bd(copy.deepcopy(self.dataset[idx][0]), None, args.data,
+                                                         pattern_type=args.pattern_type, agent_idx=client_id,
+                                                         attack=args.attack)
                 # plt.imshow(self.poison_sample[idx].permute(1, 2, 0))
                 # plt.show()
-
 
     def classes(self):
         return torch.unique(self.targets)
@@ -85,23 +87,21 @@ class DatasetSplit(Dataset):
         return inp, target
 
 
-
-def distribute_data_dirichlet(dataset,args ):
+def distribute_data_dirichlet(dataset, args):
     # sort labels
     labels_sorted = dataset.targets.sort()
     # create a list of pairs (index, label), i.e., at index we have an instance of  label
     class_by_labels = list(zip(labels_sorted.values.tolist(), labels_sorted.indices.tolist()))
     labels_dict = defaultdict(list)
-   
+
     for k, v in class_by_labels:
         labels_dict[k].append(v)
     # convert list to a dictionary, e.g., at labels_dict[0], we have indexes for class 0
     N = len(labels_sorted[1])
-    K= len(labels_dict)
-    logging.info((N,K))
+    K = len(labels_dict)
+    logging.info((N, K))
     client_num = args.num_agents
 
-   
     min_size = 0
     while min_size < 10:
         idx_batch = [[] for _ in range(client_num)]
@@ -122,25 +122,30 @@ def distribute_data_dirichlet(dataset,args ):
             # generate the batch list for each client
             idx_batch = [idx_j + idx.tolist() for idx_j, idx in zip(idx_batch, np.split(idx_k, proportions))]
             min_size = min([len(idx_j) for idx_j in idx_batch])
-        
-     # distribute data to users
+
+    # distribute data to users
     dict_users = defaultdict(list)
     for user_idx in range(args.num_agents):
         dict_users[user_idx] = idx_batch[user_idx]
         np.random.shuffle(dict_users[user_idx])
-   
-    num = [ [ 0 for k in range(K) ] for i in range(client_num)]
-    for k in range(K):
-        for i in dict_users:
-            num[i][k] = len(np.intersect1d(dict_users[i], labels_dict[k]))
-    logging.info(num)
+
+    # num = [ [ 0 for k in range(K) ] for i in range(client_num)]
+    # for k in range(K):
+    #     for i in dict_users:
+    #         num[i][k] = len(np.intersect1d(dict_users[i], labels_dict[k]))
+    # logging.info(num)
     # print(dict_users)
+    # def intersection(lst1, lst2):
+    #     lst3 = [value for value in lst1 if value in lst2]
+    #     return lst3
+    # # logging.info( [len(intersection (dict_users[i], dict_users[i+1] )) for i in range(args.num_agents)] )
     return dict_users
+
 
 def distribute_data(dataset, args, n_classes=10):
     # logging.info(dataset.targets)
     # logging.info(dataset.classes)
-    class_per_agent=n_classes
+    class_per_agent = n_classes
 
     if args.num_agents == 1:
         return {0: range(len(dataset))}
@@ -163,7 +168,7 @@ def distribute_data(dataset, args, n_classes=10):
     slice_size = (len(dataset) // n_classes) // shard_size
     for k, v in labels_dict.items():
         labels_dict[k] = chunker_list(v, slice_size)
-
+    hey = copy.deepcopy(labels_dict)
     # distribute shards to users
     dict_users = defaultdict(list)
     for user_idx in range(args.num_agents):
@@ -175,19 +180,24 @@ def distribute_data(dataset, args, n_classes=10):
                 dict_users[user_idx] += labels_dict[j][0]
                 del labels_dict[j % n_classes][0]
                 class_ctr += 1
-    # num = [ [ 0 for k in range(K) ] for i in range(args.num_agents)]
-    # for k in range(K):
+    # num = [ [ 0 for k in range(n_classes) ] for i in range(args.num_agents)]
+    # for k in range(n_classes):
     #     for i in dict_users:
-    #         num[i][k] = len(np.intersect1d(dict_users[i], labels_dict[k]))
+    #         num[i][k] = len(np.intersect1d(dict_users[i], hey[k]))
     # logging.info(num)
-    # print(dict_users)
+    # logging.info(args.num_agents)
+    # def intersection(lst1, lst2):
+    #     lst3 = [value for value in lst1 if value in lst2]
+    #     return lst3
+    # logging.info( len(intersection (dict_users[0], dict_users[1] )))
+
     return dict_users
 
 
 def get_datasets(data):
     """ returns train and test datasets """
     train_dataset, test_dataset = None, None
-    data_dir = '../../data'
+    data_dir = '../data'
 
     if data == 'fmnist':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=[0.5], std=[0.5])])
@@ -205,7 +215,7 @@ def get_datasets(data):
 
     elif data == 'cifar10':
         transform_train = transforms.Compose([
-            transforms.RandomCrop(32, padding=4,padding_mode='reflect'),
+            transforms.RandomCrop(32, padding=4, padding_mode='reflect'),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize(mean=(0.4914, 0.4822, 0.4465), std=(0.2023, 0.1994, 0.2010)),
@@ -219,18 +229,18 @@ def get_datasets(data):
         train_dataset.targets, test_dataset.targets = torch.LongTensor(train_dataset.targets), torch.LongTensor(
             test_dataset.targets)
     elif data == 'cifar100':
-        transform = transforms.Compose([transforms.RandomCrop(32,padding=4,padding_mode='reflect'),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5071, 0.4867, 0.4408],
-                                                                     std=[0.2675, 0.2565, 0.2761])])
-        valid_transform = transforms.Compose([transforms.ToTensor(),
+        transform = transforms.Compose([transforms.RandomCrop(32, padding=4, padding_mode='reflect'),
+                                        transforms.RandomHorizontalFlip(),
+                                        transforms.ToTensor(),
                                         transforms.Normalize(mean=[0.5071, 0.4867, 0.4408],
                                                              std=[0.2675, 0.2565, 0.2761])])
+        valid_transform = transforms.Compose([transforms.ToTensor(),
+                                              transforms.Normalize(mean=[0.5071, 0.4867, 0.4408],
+                                                                   std=[0.2675, 0.2565, 0.2761])])
         train_dataset = datasets.CIFAR100(data_dir,
-                                                train=True , download=True, transform=transform)
+                                          train=True, download=True, transform=transform)
         test_dataset = datasets.CIFAR100(data_dir,
-                                                      train=False, download=True, transform=valid_transform)
+                                         train=False, download=True, transform=valid_transform)
         train_dataset.targets, test_dataset.targets = torch.LongTensor(train_dataset.targets), torch.LongTensor(
             test_dataset.targets)
     elif data == "tinyimagenet":
@@ -244,12 +254,12 @@ def get_datasets(data):
         }
         _data_dir = '../data/tiny-imagenet-200/'
         train_dataset = datasets.ImageFolder(os.path.join(_data_dir, 'train'),
-                                                  _data_transforms['train'])
+                                             _data_transforms['train'])
         # print(train_dataset[0][0].shape)
         test_dataset = datasets.ImageFolder(os.path.join(_data_dir, 'val'),
-                                                 _data_transforms['val'])
+                                            _data_transforms['val'])
         train_dataset.targets = torch.tensor(train_dataset.targets)
-        test_dataset .targets = torch.tensor(test_dataset.targets)
+        test_dataset.targets = torch.tensor(test_dataset.targets)
     return train_dataset, test_dataset
 
 
@@ -277,7 +287,7 @@ def get_loss_n_accuracy(model, criterion, data_loader, args, round, num_classes=
         # compute the total loss over minibatch
         outputs = model(inputs)
         avg_minibatch_loss = criterion(outputs, labels)
-        total_loss += avg_minibatch_loss.item()*outputs.shape[0]
+        total_loss += avg_minibatch_loss.item() * outputs.shape[0]
 
         # get num of correctly predicted inputs in the current batch
         _, pred_labels = torch.max(outputs, 1)
@@ -297,14 +307,13 @@ def get_loss_n_accuracy(model, criterion, data_loader, args, round, num_classes=
 
 
 def poison_dataset(dataset, args, data_idxs=None, poison_all=False, agent_idx=-1, modify_label=True):
-    
     # if data_idxs != None:
     #     all_idxs = list(set(all_idxs).intersection(data_idxs))
-    if data_idxs!=None:
+    if data_idxs != None:
         all_idxs = (dataset.targets != args.target_class).nonzero().flatten().tolist()
-        all_idxs =list(set(all_idxs).intersection(data_idxs))
+        all_idxs = list(set(all_idxs).intersection(data_idxs))
     else:
-        all_idxs =(dataset.targets != args.target_class).nonzero().flatten().tolist()
+        all_idxs = (dataset.targets != args.target_class).nonzero().flatten().tolist()
     poison_frac = 1 if poison_all else args.poison_frac
     poison_idxs = random.sample(all_idxs, floor(poison_frac * len(all_idxs)))
     for idx in poison_idxs:
@@ -314,19 +323,18 @@ def poison_dataset(dataset, args, data_idxs=None, poison_all=False, agent_idx=-1
             clean_img = dataset[idx][0]
         else:
             clean_img = dataset.data[idx]
-        bd_img = add_pattern_bd(clean_img, dataset.targets[idx] ,args.data, pattern_type=args.pattern_type, agent_idx=agent_idx, attack=args.attack)
+        bd_img = add_pattern_bd(clean_img, dataset.targets[idx], args.data, pattern_type=args.pattern_type,
+                                agent_idx=agent_idx, attack=args.attack)
         if args.data == 'fedemnist':
             dataset.inputs[idx] = torch.tensor(bd_img)
         elif args.data == "tinyimagenet":
-           # don't do anything for tinyimagenet, we poison it in run time
-           return
+            # don't do anything for tinyimagenet, we poison it in run time
+            return
         else:
             dataset.data[idx] = torch.tensor(bd_img)
         if modify_label:
             dataset.targets[idx] = args.target_class
     return
-
-
 
 
 def init_masks(params, sparsities):
@@ -342,9 +350,10 @@ def init_masks(params, sparsities):
         masks[name] = masks[name].to("cpu")
     return masks
 
+
 def vector_to_model(vec, model):
     # Pointer for slicing the vector for each parameter
-    state_dict=model.state_dict()
+    state_dict = model.state_dict()
     pointer = 0
     for name in state_dict:
         # The length of the parameter
@@ -354,7 +363,6 @@ def vector_to_model(vec, model):
         # Increment the pointer
         pointer += num_param
     model.load_state_dict(state_dict)
-
     return state_dict
 
 
@@ -443,70 +451,45 @@ def name_param_to_array(param):
     return torch.cat(vec)
 
 
+def vector_to_name_param(vec, name_param_map):
+    pointer = 0
+    for name in name_param_map:
+        # The length of the parameter
+        num_param = name_param_map[name].numel()
+        # Slice the vector, reshape it, and replace the old data of the parameter
+        name_param_map[name].data = vec[pointer:pointer + num_param].view_as(name_param_map[name]).data
+        # Increment the pointer
+        pointer += num_param
+
+    return name_param_map
+
+
 def add_pattern_bd(x, y, dataset='cifar10', pattern_type='square', agent_idx=-1, attack="DBA"):
     """
     adds a trojan pattern to the image
     """
 
     # if cifar is selected, we're doing a distributed backdoor attack (i.e., portions of trojan pattern is split between agents, only works for plus)
-    if dataset == 'cifar10' or dataset == "cifar100" :
+    if dataset == 'cifar10' or dataset == "cifar100":
         x = np.array(x.squeeze())
-        if pattern_type == 'plus':
-            start_idx = 5
-            size = 6
-            if agent_idx == -1:
-                # vertical line
-                for d in range(0, 3):
-                    for i in range(start_idx, start_idx + size + 1):
-                        if d==2:
-                            x[i, start_idx][d] = 0
-                        else:
-                            x[i, start_idx][d] = 255
-                # horizontal line
-                for d in range(0, 3):
-                    for i in range(start_idx - size // 2, start_idx + size // 2 + 1):
-                        if d == 2:
-                            x[start_idx + size // 2, i][d] = 0
-                        else:
-                            x[start_idx + size // 2, i][d] = 255
-            else:
-                if attack == "DBA":
-                    # DBA attack
-                    # upper part of vertical
-                    if agent_idx % 4 == 0:
-                        for d in range(0, 3):
-                            for i in range(start_idx, start_idx + (size // 2) + 1):
-                                if d == 2:
-                                    x[i, start_idx][d] = 0
-                                else:
-                                    x[i, start_idx][d] = 255
+        # logging.info(x.shape)
+        row = x.shape[0]
+        column = x.shape[1]
 
-                    # lower part of vertical
-                    elif agent_idx % 4 == 1:
-                        for d in range(0, 3):
-                            for i in range(start_idx + (size // 2) + 1, start_idx + size + 1):
-                                if d == 2:
-                                    x[i, start_idx][d] = 0
-                                else:
-                                    x[i, start_idx][d] = 255
-
-                    # left-part of horizontal
-                    elif agent_idx % 4 == 2:
-                        for d in range(0, 3):
-                            for i in range(start_idx - size // 2, start_idx - size // 4 + 1):
-                                if d == 2:
-                                    x[start_idx + size // 2, i][d] = 0
-                                else:
-                                    x[start_idx + size // 2, i][d] = 255
-                    # right-part of horizontal
-                    elif agent_idx % 4 == 3:
-                        for d in range(0, 3):
-                            for i in range(start_idx - size // 4 + 1, start_idx + size // 2 + 1):
-                                if d == 2:
-                                    x[start_idx + size // 2, i][d] = 0
-                                else:
-                                    x[start_idx + size // 2, i][d] = 255
-                else:
+        if attack == "periodic_trigger":
+            for d in range(0, 3):
+                for i in range(row):
+                    for j in range(column):
+                        x[i][j][d] = max(min(x[i][j][d] + 20 * math.sin((2 * math.pi * j * 6) / column), 255), 0)
+            # import matplotlib.pyplot as plt
+            # plt.imsave("visualization/input_images/backdoor2.png", x)
+            # print(y)
+            # plt.show()
+        else:
+            if pattern_type == 'plus':
+                start_idx = 5
+                size = 6
+                if agent_idx == -1:
                     # vertical line
                     for d in range(0, 3):
                         for i in range(start_idx, start_idx + size + 1):
@@ -521,13 +504,65 @@ def add_pattern_bd(x, y, dataset='cifar10', pattern_type='square', agent_idx=-1,
                                 x[start_idx + size // 2, i][d] = 0
                             else:
                                 x[start_idx + size // 2, i][d] = 255
+                else:
+                    if attack == "DBA":
+                        # DBA attack
+                        # upper part of vertical
+                        if agent_idx % 4 == 0:
+                            for d in range(0, 3):
+                                for i in range(start_idx, start_idx + (size // 2) + 1):
+                                    if d == 2:
+                                        x[i, start_idx][d] = 0
+                                    else:
+                                        x[i, start_idx][d] = 255
 
-            # import matplotlib.pyplot as plt
-            # if agent_idx == -1:
-            #     # plt.imsave("visualization/input_images/backdoor2.png", x)
-            #     print(y)
-            #     plt.show()
-            # plt.savefig()
+                        # lower part of vertical
+                        elif agent_idx % 4 == 1:
+                            for d in range(0, 3):
+                                for i in range(start_idx + (size // 2) + 1, start_idx + size + 1):
+                                    if d == 2:
+                                        x[i, start_idx][d] = 0
+                                    else:
+                                        x[i, start_idx][d] = 255
+
+                        # left-part of horizontal
+                        elif agent_idx % 4 == 2:
+                            for d in range(0, 3):
+                                for i in range(start_idx - size // 2, start_idx - size // 4 + 1):
+                                    if d == 2:
+                                        x[start_idx + size // 2, i][d] = 0
+                                    else:
+                                        x[start_idx + size // 2, i][d] = 255
+                        # right-part of horizontal
+                        elif agent_idx % 4 == 3:
+                            for d in range(0, 3):
+                                for i in range(start_idx - size // 4 + 1, start_idx + size // 2 + 1):
+                                    if d == 2:
+                                        x[start_idx + size // 2, i][d] = 0
+                                    else:
+                                        x[start_idx + size // 2, i][d] = 255
+                    else:
+                        # vertical line
+                        for d in range(0, 3):
+                            for i in range(start_idx, start_idx + size + 1):
+                                if d == 2:
+                                    x[i, start_idx][d] = 0
+                                else:
+                                    x[i, start_idx][d] = 255
+                        # horizontal line
+                        for d in range(0, 3):
+                            for i in range(start_idx - size // 2, start_idx + size // 2 + 1):
+                                if d == 2:
+                                    x[start_idx + size // 2, i][d] = 0
+                                else:
+                                    x[start_idx + size // 2, i][d] = 255
+
+                # import matplotlib.pyplot as plt
+                #
+                # plt.imsave("visualization/input_images/backdoor2.png", x)
+                # print(y)
+                # plt.show()
+
     elif dataset == 'tinyimagenet':
         if pattern_type == 'plus':
             start_idx = 5
@@ -535,15 +570,15 @@ def add_pattern_bd(x, y, dataset='cifar10', pattern_type='square', agent_idx=-1,
             # vertical line
             for d in range(0, 3):
                 for i in range(start_idx, start_idx + size + 1):
-                    if d==2:
-                        x[d][i][start_idx]=0
+                    if d == 2:
+                        x[d][i][start_idx] = 0
                     else:
                         x[d][i][start_idx] = 1
             # horizontal line
             for d in range(0, 3):
                 for i in range(start_idx - size // 2, start_idx + size // 2 + 1):
                     if d == 2:
-                        x[d][start_idx + size // 2][ i] = 0
+                        x[d][start_idx + size // 2][i] = 0
                     else:
                         x[d][start_idx + size // 2][i] = 1
 
@@ -559,41 +594,41 @@ def add_pattern_bd(x, y, dataset='cifar10', pattern_type='square', agent_idx=-1,
             start_idx = 5
             size = 6
             if agent_idx == -1:
-                # vertical line  
-                for i in range(start_idx, start_idx+size+1):
+                # vertical line
+                for i in range(start_idx, start_idx + size + 1):
                     x[i, start_idx] = 255
                 # horizontal line
-                for i in range(start_idx-size//2, start_idx+size//2 + 1):
-                    x[start_idx+size//2, i] = 255
+                for i in range(start_idx - size // 2, start_idx + size // 2 + 1):
+                    x[start_idx + size // 2, i] = 255
             else:
                 if attack == "DBA":
-                     # DBA attack
-                    #upper part of vertical 
+                    # DBA attack
+                    # upper part of vertical
                     if agent_idx % 4 == 0:
-                        for i in range(start_idx, start_idx+(size//2)+1):
+                        for i in range(start_idx, start_idx + (size // 2) + 1):
                             x[i, start_idx] = 255
-                            
-                    #lower part of vertical
-                    elif agent_idx % 4 == 1:
-                        for i in range(start_idx+(size//2)+1, start_idx+size+1):
-                            x[i, start_idx] = 255
-                                
-                    #left-part of horizontal
-                    elif agent_idx % 4 == 2:
-                        for i in range(start_idx-size//2, start_idx-size//4 + 1):
-                            x[start_idx+size//2, i] = 255
 
-                    #right-part of horizontal
+                    # lower part of vertical
+                    elif agent_idx % 4 == 1:
+                        for i in range(start_idx + (size // 2) + 1, start_idx + size + 1):
+                            x[i, start_idx] = 255
+
+                    # left-part of horizontal
+                    elif agent_idx % 4 == 2:
+                        for i in range(start_idx - size // 2, start_idx - size // 4 + 1):
+                            x[start_idx + size // 2, i] = 255
+
+                    # right-part of horizontal
                     elif agent_idx % 4 == 3:
-                        for i in range(start_idx-size//4+1, start_idx+size//2 + 1):
-                            x[start_idx+size//2, i]= 255
+                        for i in range(start_idx - size // 4 + 1, start_idx + size // 2 + 1):
+                            x[start_idx + size // 2, i] = 255
                 else:
-                     # vertical line  
-                    for i in range(start_idx, start_idx+size+1):
+                    # vertical line
+                    for i in range(start_idx, start_idx + size + 1):
                         x[i, start_idx] = 255
                     # horizontal line
-                    for i in range(start_idx-size//2, start_idx+size//2 + 1):
-                        x[start_idx+size//2, i] = 255
+                    for i in range(start_idx - size // 2, start_idx + size // 2 + 1):
+                        x[start_idx + size // 2, i] = 255
 
     elif dataset == 'mnist':
         x = np.array(x.squeeze())

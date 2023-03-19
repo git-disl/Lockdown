@@ -43,9 +43,10 @@ if __name__ == '__main__':
                 args.num_corrupt, args.num_agents, args.method, args.data, args.alpha, args.local_ep, args.poison_frac,
                 args.dense_ratio, args.aggr, args.se_threshold, args.non_iid, args.theta, args.attack)
         else:
-            fileName = "AckRatio{}_{}_Method{}_data{}_alpha{}_Epoch{}_inject{}_dense{}_Agg{}_se_threshold{}_noniid{}_maskthreshold{}_attack{}.pt".format(
+            fileName = "AckRatio{}_{}_Method{}_data{}_alpha{}_Epoch{}_inject{}_dense{}_Agg{}_se_threshold{}_noniid{}_maskthreshold{}_attack{}_endpoison{}.pt".format(
                 args.num_corrupt, args.num_agents, args.method, args.data, args.alpha, args.local_ep, args.poison_frac,
-                args.dense_ratio, args.aggr, args.se_threshold, args.non_iid, args.theta, args.attack)
+                args.dense_ratio, args.aggr, args.se_threshold, args.non_iid, args.robustLR_threshold, args.attack,
+                args.cease_poison)
         fileHandler = logging.FileHandler("{0}/{1}.log".format(logPath, fileName))
         fileHandler.setFormatter(logFormatter)
         rootLogger.addHandler(fileHandler)
@@ -103,6 +104,9 @@ if __name__ == '__main__':
 
     # initialize a model, and the agents
     global_model = models.get_model(args.data).to(args.device)
+    global_mask = {}
+    neurotoxin_mask = {}
+    updates_dict = {}
     n_model_params = len(parameters_to_vector([ global_model.state_dict()[name] for name in global_model.state_dict()]))
     params = {name: copy.deepcopy(param) for name, param in global_model.named_parameters()}
     if args.method == "lockdown":
@@ -166,19 +170,19 @@ if __name__ == '__main__':
             # logging.info(torch.sum(rnd_global_params))
             global_model = global_model.to(args.device)
             if args.method == "lockdown" or args.method == "fedimp":
-                update = agents[agent_id].local_train(global_model, criterion, rnd)
+                update = agents[agent_id].local_train(global_model, criterion, rnd, global_mask=global_mask, neurotoxin_mask = neurotoxin_mask, updates_dict=updates_dict)
             else:
-                update = agents[agent_id].local_train(global_model, criterion, rnd)
+                update = agents[agent_id].local_train(global_model, criterion, rnd, neurotoxin_mask=neurotoxin_mask)
             agent_updates_dict[agent_id] = update
             utils.vector_to_model(copy.deepcopy(rnd_global_params), global_model)
 
         # aggregate params obtained by agents and update the global params
         if args.method == "lockdown" or args.method == "fedimp":
-            _, _, _ = aggregator.aggregate_updates(global_model, agent_updates_dict, rnd, masks=old_mask,
+            _, _, updates_dict,neurotoxin_mask = aggregator.aggregate_updates(global_model, agent_updates_dict, rnd, masks=old_mask,
                                                    agent_updates_dict_prev=None,
                                                    mask_aggrement=mask_aggrement)
         else:
-            _, _, _ = aggregator.aggregate_updates(global_model, agent_updates_dict, rnd,
+            _, _, updates_dict,neurotoxin_mask = aggregator.aggregate_updates(global_model, agent_updates_dict, rnd,
                                                    agent_updates_dict_prev=None,
                                                    mask_aggrement=mask_aggrement)
         # agent_updates_list.append(np.array(server_update.to("cpu")))

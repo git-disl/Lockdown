@@ -5,7 +5,7 @@ import numpy as np
 from copy import deepcopy
 from torch.nn import functional as F
 
-from utils import vector_to_model
+from utils import name_param_to_array,  vector_to_model, vector_to_name_param
 
 
 class Aggregation():
@@ -37,10 +37,24 @@ class Aggregation():
             aggregated_updates = self.agg_krum(agent_updates_dict)
         elif self.args.aggr == "mask_avg":
             aggregated_updates = self.agg_mask_avg(agent_updates_dict,global_model, masks)
+        elif self.args.aggr == "gm":
+            aggregated_updates = self.agg_gm(agent_updates_dict,cur_global_params)
+        elif self.args.aggr == "tm":
+            aggregated_updates = self.agg_tm(agent_updates_dict)
+        neurotoxin_mask = {}
+        updates_dict = vector_to_name_param(aggregated_updates, copy.deepcopy(global_model.state_dict()))
+        for name in updates_dict:
+            updates = updates_dict[name].abs().view(-1)
+            gradients_length = len(updates)
+            _, indices = torch.topk(-1 * updates, int(gradients_length * self.args.dense_ratio))
+            mask_flat = torch.zeros(gradients_length)
+            mask_flat[indices.cpu()] = 1
+            neurotoxin_mask[name] = (mask_flat.reshape(updates_dict[name].size()))
+
         cur_global_params = parameters_to_vector([ global_model.state_dict()[name] for name in global_model.state_dict()]).detach()
         new_global_params =  (cur_global_params + lr_vector*aggregated_updates).float()
         vector_to_model(new_global_params, global_model)
-        return    None, None,None
+        return    None, None,updates_dict, neurotoxin_mask
 
 
     def compute_robustLR(self, agent_updates_dict):

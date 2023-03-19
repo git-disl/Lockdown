@@ -82,6 +82,6 @@ def args_parser():
     parser.add_argument('--mask_init', type=str, default="ERK")
     parser.add_argument('--dis_check_gradient', action='store_true', default=False)
     parser.add_argument('--wd', type=float, default= 1e-4)
-
+    parser.add_argument('--cease_poison', type=float, default=100000)
     args = parser.parse_args()
     return args
