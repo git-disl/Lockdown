@@ -1,3 +1,5 @@
+import copy
+
 import torch
 import models
 from torch.nn.utils import vector_to_parameters, parameters_to_vector
@@ -27,6 +29,8 @@ class Aggregation():
             lr_vector, _ = self.compute_robustLR(agent_updates_dict)
         # mask = torch.ones_like(agent_updates_dict[0])
         aggregated_updates = 0
+        cur_global_params = parameters_to_vector(
+            [global_model.state_dict()[name] for name in global_model.state_dict()]).detach()
         if self.args.aggr=='avg':          
             aggregated_updates = self.agg_avg(agent_updates_dict)
         elif self.args.aggr=='comed':
