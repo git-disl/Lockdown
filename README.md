@@ -20,11 +20,7 @@ Dataset FashionMnist and CIFAR10/100 will be automatically downloaded with Torch
 ## Command to run
 The following code run lockdown in its default setting
 ```
-python federated.py  --method lockdown \
-                     --aggr mask_avg \
-                      --mask_init ERK \
-                       --se_threshold 1e-4 \
-                        --theta 25 \
+python federated.py  --method lockdown 
 ```
 You can also find script in directory `src/script`.
 

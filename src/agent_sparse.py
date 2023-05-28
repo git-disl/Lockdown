@@ -12,7 +12,6 @@ import numpy as np
 import torch.nn.functional as F
 import logging
 
-
 class Agent():
     def __init__(self, id, args, train_dataset=None, data_idxs=None, mask=None):
         self.id = id
@@ -28,7 +27,7 @@ class Agent():
 
         else:
             if self.args.data != "tinyimagenet":
-
+                
                 self.train_dataset = utils.DatasetSplit(train_dataset, data_idxs)
                 # for backdoor attack, agent poisons his local dataset
                 if self.id < args.num_corrupt:
@@ -46,22 +45,26 @@ class Agent():
         self.n_data = len(self.train_dataset)
 
         self.mask = copy.deepcopy(mask)
+        self.num_remove= None
 
     def check_poison_timing(self, round):
-        if round > self.args.cease_poison:
+        if round> self.args.cease_poison:
             self.train_dataset = utils.DatasetSplit(self.clean_backup_dataset, self.data_idxs)
             self.train_loader = DataLoader(self.train_dataset, batch_size=self.args.bs, shuffle=True, \
-                                           num_workers=self.args.num_workers, pin_memory=False, drop_last=True)
+                                       num_workers=self.args.num_workers, pin_memory=False, drop_last=True)
 
-    def screen_gradients(self, model, temparature=10, alpha=0.1):
-        model.eval()
+
+
+
+    def screen_gradients(self, model):
+        model.train()
         # # # train and update
         criterion = nn.CrossEntropyLoss()
         gradient = {name: 0 for name, param in model.named_parameters()}
         # # sample 10 batch  of data
         batch_num = 0
         for _, (x, labels) in enumerate(self.train_loader):
-            batch_num += 1
+            batch_num+=1
             model.zero_grad()
             x, labels = x.to(self.args.device), labels.to(self.args.device)
             log_probs = model.forward(x)
@@ -73,108 +76,91 @@ class Agent():
         return gradient
 
     def update_mask(self, masks, num_remove, gradient=None):
-        new_mask = copy.deepcopy(masks)
-        for name in masks:
-            if num_remove[name] == 0:
-                continue
-            if self.args.dis_check_gradient or gradient == None:
+        for name in gradient:
+            if self.args.dis_check_gradient:
                 temp = torch.where(masks[name] == 0, torch.ones_like(masks[name]), torch.zeros_like(masks[name]))
                 idx = torch.multinomial(temp.flatten().to(self.args.device), num_remove[name], replacement=False)
-                new_mask[name].view(-1)[idx] = 1
+                masks[name].view(-1)[idx] = 1
             else:
                 temp = torch.where(masks[name].to(self.args.device) == 0, torch.abs(gradient[name]),
-                                   -100000 * torch.ones_like(gradient[name]))
+                                    -100000 * torch.ones_like(gradient[name]))
                 sort_temp, idx = torch.sort(temp.view(-1), descending=True)
-                new_mask[name].view(-1)[idx[:num_remove[name]]] = 1
-        return new_mask
+                masks[name].view(-1)[idx[:num_remove[name]]] = 1
+        return masks
+    
+    def init_mask(self,  gradient=None):
+        for name in self.mask:
+            num_init = torch.count_nonzero(self.mask[name])
+            self.mask[name] = torch.zeros_like(self.mask[name])
+            sort_temp, idx = torch.sort(torch.abs(gradient[name]).view(-1), descending=True)
+            self.mask[name].view(-1)[idx[:num_init]] = 1
+             
 
     def fire_mask(self, weights, masks, round):
-        new_mask = copy.deepcopy(masks)
-        if round <= self.args.rounds / 2:
-            drop_ratio = self.args.anneal_factor / 2 * (1 + np.cos((round * np.pi) / (self.args.rounds / 2)))
-        else:
-            drop_ratio = 0
+        
+        drop_ratio = self.args.anneal_factor / 2 * (1 + np.cos((round * np.pi) / (self.args.rounds)))
+    
         # logging.info(drop_ratio)
         num_remove = {}
         for name in masks:
-            num_non_zeros = torch.sum(masks[name])
-            num_remove[name] = math.ceil(drop_ratio * num_non_zeros)
-            if num_remove[name] > 0:
-                temp_weights = torch.where(masks[name] > 0, torch.abs(weights[name]),
-                                           100000 * torch.ones_like(weights[name]))
+                num_non_zeros = torch.sum(masks[name].to(self.args.device))
+                num_remove[name] = math.ceil(drop_ratio * num_non_zeros)
+     
+        for name in masks:
+            if num_remove[name]>0 and  "track" not in name and "running" not in name: 
+                temp_weights = torch.where(masks[name].to(self.args.device) > 0, torch.abs(weights[name]),
+                                        100000 * torch.ones_like(weights[name]))
                 x, idx = torch.sort(temp_weights.view(-1).to(self.args.device))
-                new_mask[name].view(-1)[idx[:num_remove[name]]] = 0
-                weights[name] *= new_mask[name]
-        return new_mask, num_remove
+                masks[name].view(-1)[idx[:num_remove[name]]] = 0
+        return masks, num_remove
 
-    def local_train(self, global_model, criterion, round=None, temparature=10, alpha=0.3, global_mask=None,
-                    neurotoxin_mask=None, updates_dict=None):
+
+
+    def local_train(self, global_model, criterion, round=None, temparature=10, alpha=0.3, global_mask= None, neurotoxin_mask =None, updates_dict =None):
         """ Do a local training over the received global model, return the update """
-        # if  self.id<self.args.num_corrupt and self.mask_update!= None:
-        #     initial_global_model_params_local = self.mask_update.to(self.args.device) + initial_global_model_params.to(self.args.device) * (1-self.previous_mask.to(self.args.device))
-        #     vector_to_parameters(initial_global_model_params_local, global_model.parameters())
-        if self.id < self.args.num_corrupt:
+        initial_global_model_params = parameters_to_vector([ global_model.state_dict()[name] for name in global_model.state_dict()]).detach()
+        if self.id  <  self.args.num_corrupt:
             self.check_poison_timing(round)
+        global_model.to(self.args.device)
         for name, param in global_model.named_parameters():
-            self.mask[name] = self.mask[name].to(self.args.device)
+            self.mask[name] =self.mask[name].to(self.args.device)
             param.data = param.data * self.mask[name]
+        if self.num_remove!=None:
+            if self.id>=  self.args.num_corrupt or self.args.attack!="fix_mask" :
+                gradient = self.screen_gradients(global_model)
+                self.mask = self.update_mask(self.mask, self.num_remove, gradient)
+        
         global_model.train()
-        initial_global_model_params = parameters_to_vector(
-            [global_model.state_dict()[name] for name in global_model.state_dict()]).detach()
         # print(torch.sum(initial_global_model_params))
-        lr = self.args.client_lr * (self.args.lr_decay) ** round
+        lr = self.args.client_lr* (self.args.lr_decay)**round
         # logging.info(lr)
         optimizer = torch.optim.SGD(global_model.parameters(), lr=lr, weight_decay=self.args.wd)
-        # pure_gradient_update = torch.zeros_like(initial_global_model_params)
-
-        if self.id < self.args.num_corrupt and (
-                self.args.attack == "omniscient" or self.args.attack == "fix_mask" or self.args.attack == "neurotoxin"):
-            do_l1_norm = False
-        else:
-            do_l1_norm = True
 
         for _ in range(self.args.local_ep):
-            # start = time.time()
             for _, (inputs, labels) in enumerate(self.train_loader):
-
                 optimizer.zero_grad()
                 inputs, labels = inputs.to(device=self.args.device), \
                                  labels.to(device=self.args.device)
-
                 outputs = global_model(inputs)
-
-                # KL_loss = nn.KLDivLoss()(F.log_softmax(outputs/temparature, dim=1),F.softmax(dense_outputs/temparature,dim=1))
                 minibatch_loss = criterion(outputs, labels)
-
-                if round <= self.args.rounds / 2 and do_l1_norm:
-                    for name, param in global_model.named_parameters():
-                        minibatch_loss += self.args.se_threshold * torch.norm(param, 1)
                 loss = minibatch_loss
                 loss.backward()
                 for name, param in global_model.named_parameters():
-                    param.grad.data = self.mask[name] * param.grad.data
+                    param.grad.data = self.mask[name].to(self.args.device) * param.grad.data
                 optimizer.step()
-            # end = time.time()
-            # print(end - start)
 
-        with torch.no_grad():
-            after_train = parameters_to_vector(
-                [global_model.state_dict()[name] for name in global_model.state_dict()]).detach()
-            self.update = (after_train - initial_global_model_params)
-            if "scale" in self.args.attack:
-                logging.info("scale update for" + self.args.attack.split("_", 1)[1] + " times")
-                if self.id < self.args.num_corrupt:
-                    self.update = int(self.args.attack.split("_", 1)[1]) * self.update
+           
+        
 
-        if self.id < self.args.num_corrupt:
-            if self.args.attack == "fix_mask":
-                self.mask = self.mask
+        if self.id<  self.args.num_corrupt:
+            if self.args.attack=="fix_mask":
+                self.mask = self.mask 
 
             elif self.args.attack == "omniscient":
                 if len(global_mask):
                     self.mask = copy.deepcopy(global_mask)
                 else:
-                    self.mask = self.mask
+                    self.mask = self.mask 
             elif self.args.attack == "neurotoxin":
                 if len(neurotoxin_mask):
                     self.mask = neurotoxin_mask
@@ -182,20 +168,21 @@ class Agent():
                     self.mask = self.mask
             elif self.args.attack == "snooper":
                 if len(updates_dict):
-                    self.mask, num_remove = self.fire_mask(updates_dict, self.mask, round)
-                    self.mask = self.update_mask(self.mask, num_remove)
+                    self.mask, self.num_remove = self.fire_mask(updates_dict , self.mask, round)
+
             else:
-                self.mask, num_remove = self.fire_mask(global_model.state_dict(), self.mask, round)
-                gradient = self.screen_gradients(global_model, temparature=temparature, alpha=alpha)
-                # gradient = {name: torch.zeros_like(param) for name, param in global_model.named_parameters()}
-                self.mask = self.update_mask(self.mask, num_remove, gradient)
+                self.mask, self.num_remove = self.fire_mask(global_model.state_dict(), self.mask, round)
 
         else:
-            self.mask, num_remove = self.fire_mask(global_model.state_dict(), self.mask, round)
-            gradient = self.screen_gradients(global_model, temparature=temparature, alpha=alpha)
-            # gradient = {name: torch.zeros_like(param) for name, param in global_model.named_parameters()}
-            self.mask = self.update_mask(self.mask, num_remove, gradient)
-        for name in self.mask:
-            self.mask[name] = self.mask[name].to("cpu")
+            self.mask, self.num_remove = self.fire_mask(global_model.state_dict(), self.mask, round) 
+            
+        with torch.no_grad():
+            after_train = parameters_to_vector([ global_model.state_dict()[name] for name in global_model.state_dict()]).detach()
+            array_mask = parameters_to_vector([ self.mask[name].to(self.args.device) for name in global_model.state_dict()]).detach()
+            self.update = ( array_mask *(after_train - initial_global_model_params))
+            if "scale" in self.args.attack:
+                logging.info("scale update for" + self.args.attack.split("_",1)[1] + " times")
+                if self.id<  self.args.num_corrupt:
+                    self.update=  int(self.args.attack.split("_",1)[1]) * self.update
         return self.update
 

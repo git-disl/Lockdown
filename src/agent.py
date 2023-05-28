@@ -8,7 +8,7 @@ import utils
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.utils.data import DataLoader
 import torch.nn as nn
-
+import logging
 
 class Agent():
     def __init__(self, id, args, train_dataset=None, data_idxs=None, mask=None):
@@ -51,10 +51,6 @@ class Agent():
         """ Do a local training over the received global model, return the update """
         initial_global_model_params = parameters_to_vector(
             [global_model.state_dict()[name] for name in global_model.state_dict()]).detach()
-        # initial_global_model_params_local = parameters_to_vector(global_model.parameters()).detach()
-        # if  self.id<self.args.num_corrupt and self.mask_update!= None:
-        #     initial_global_model_params_local = self.mask_update.to(self.args.device) + initial_global_model_params.to(self.args.device) * (1-self.previous_mask.to(self.args.device))
-        #     vector_to_parameters(initial_global_model_params_local, global_model.parameters())
         if self.id < self.args.num_corrupt:
             self.check_poison_timing(round)
         global_model.train()
@@ -72,10 +68,13 @@ class Agent():
                 if self.args.attack == "neurotoxin" and len(neurotoxin_mask) and self.id < self.args.num_corrupt:
                     for name, param in global_model.named_parameters():
                         param.grad.data = neurotoxin_mask[name].to(self.args.device) * param.grad.data
+                if self.args.attack == "r_neurotoxin" and len(neurotoxin_mask) and self.id < self.args.num_corrupt:
+                    for name, param in global_model.named_parameters():
+                        param.grad.data = (torch.ones_like(neurotoxin_mask[name].to(self.args.device))-neurotoxin_mask[name].to(self.args.device) ) * param.grad.data
                 optimizer.step()
 
             end = time.time()
-            print(end - start)
+            logging.info(end - start)
 
         with torch.no_grad():
             after_train = parameters_to_vector(

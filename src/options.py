@@ -19,7 +19,7 @@ def args_parser():
     parser.add_argument('--rounds', type=int, default=200,
                         help="number of communication rounds:R")
     
-    parser.add_argument('--aggr', type=str, default='mask_avg',
+    parser.add_argument('--aggr', type=str, default='avg',
                         help="aggregation function to aggregate agents' local weights")
     
     parser.add_argument('--local_ep', type=int, default=2,
@@ -46,7 +46,7 @@ def args_parser():
     parser.add_argument('--pattern_type', type=str, default='plus',
                         help="shape of bd pattern")
     
-    parser.add_argument('--theta', type=int, default=25,
+    parser.add_argument('--theta', type=int, default=20,
                         help="break ties when votes sum to 0")
     
     parser.add_argument('--clip', type=float, default=5,
@@ -66,9 +66,9 @@ def args_parser():
     
     parser.add_argument('--num_workers', type=int, default=0, 
                         help="num of workers for multithreading")
-    parser.add_argument('--dense_ratio', type=float, default=0.5,
+    parser.add_argument('--dense_ratio', type=float, default=0.25,
                         help="num of workers for multithreading")
-    parser.add_argument('--anneal_factor', type=float, default=1,
+    parser.add_argument('--anneal_factor', type=float, default=0.0001,
                         help="num of workers for multithreading")
     parser.add_argument('--method', type=str, default="lockdown",
                         help="num of workers for multithreading")
@@ -82,6 +82,7 @@ def args_parser():
     parser.add_argument('--mask_init', type=str, default="ERK")
     parser.add_argument('--dis_check_gradient', action='store_true', default=False)
     parser.add_argument('--wd', type=float, default= 1e-4)
+    parser.add_argument('--same_mask', type=int, default= 1)
     parser.add_argument('--cease_poison', type=float, default=100000)
     args = parser.parse_args()
     return args

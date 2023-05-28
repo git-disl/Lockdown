@@ -6,7 +6,7 @@ from torch.nn.utils import vector_to_parameters, parameters_to_vector
 import numpy as np
 from copy import deepcopy
 from torch.nn import functional as F
-
+import logging
 from utils import name_param_to_array,  vector_to_model, vector_to_name_param
 
 
@@ -33,6 +33,13 @@ class Aggregation():
             [global_model.state_dict()[name] for name in global_model.state_dict()]).detach()
         if self.args.aggr=='avg':          
             aggregated_updates = self.agg_avg(agent_updates_dict)
+        if self.args.aggr== "clip_avg":
+            for _id, update in agent_updates_dict.items():
+                weight_diff_norm = torch.norm(update).item()
+                logging.info(weight_diff_norm)
+                update.data = update.data / max(1, weight_diff_norm / 2)
+            aggregated_updates = self.agg_avg(agent_updates_dict)
+            logging.info(torch.norm(aggregated_updates))
         elif self.args.aggr=='comed':
             aggregated_updates = self.agg_comed(agent_updates_dict)
         elif self.args.aggr == 'sign':
@@ -49,7 +56,7 @@ class Aggregation():
         updates_dict = vector_to_name_param(aggregated_updates, copy.deepcopy(global_model.state_dict()))
         for name in updates_dict:
             updates = updates_dict[name].abs().view(-1)
-            gradients_length = len(updates)
+            gradients_length = torch.numel(updates)
             _, indices = torch.topk(-1 * updates, int(gradients_length * self.args.dense_ratio))
             mask_flat = torch.zeros(gradients_length)
             mask_flat[indices.cpu()] = 1
@@ -122,7 +129,6 @@ class Aggregation():
 
         sm_updates, total_data = 0, 0
         for _id, update in agent_updates_dict.items():
-
             n_agent_data = self.agent_data_sizes[_id]
             sm_updates +=  n_agent_data * update
             total_data += n_agent_data

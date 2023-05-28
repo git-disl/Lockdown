@@ -35,18 +35,18 @@ if __name__ == '__main__':
     if not args.debug:
         logPath = "logs"
         if args.mask_init == "uniform":
-            fileName = "uniformAckRatio{}_{}_Method{}_data{}_alpha{}_Epoch{}_inject{}_dense{}_Agg{}_se_threshold{}_noniid{}_maskthreshold{}_attack{}.pt".format(
+            fileName = "uniformAckRatio{}_{}_Method{}_data{}_alpha{}_Epoch{}_inject{}_dense{}_Agg{}_same_mask{}_noniid{}_maskthreshold{}_attack{}_af{}.pt.pt".format(
                 args.num_corrupt, args.num_agents, args.method, args.data, args.alpha, args.local_ep, args.poison_frac,
-                args.dense_ratio, args.aggr, args.se_threshold, args.non_iid, args.theta, args.attack)
+                args.dense_ratio, args.aggr, args.same_mask, args.non_iid, args.theta, args.attack,args.anneal_factor)
         elif args.dis_check_gradient == True:
-            fileName = "NoGradientAckRatio{}_{}_Method{}_data{}_alpha{}_Epoch{}_inject{}_dense{}_Agg{}_se_threshold{}_noniid{}_maskthreshold{}_attack{}.pt".format(
+            fileName = "NoGradientAckRatio{}_{}_Method{}_data{}_alpha{}_Epoch{}_inject{}_dense{}_Agg{}_same_mask{}_noniid{}_maskthreshold{}_attack{}_af{}.pt.pt".format(
                 args.num_corrupt, args.num_agents, args.method, args.data, args.alpha, args.local_ep, args.poison_frac,
-                args.dense_ratio, args.aggr, args.se_threshold, args.non_iid, args.theta, args.attack)
+                args.dense_ratio, args.aggr, args.same_mask, args.non_iid, args.theta, args.attack,args.anneal_factor)
         else:
-            fileName = "AckRatio{}_{}_Method{}_data{}_alpha{}_Epoch{}_inject{}_dense{}_Agg{}_se_threshold{}_noniid{}_maskthreshold{}_attack{}_endpoison{}.pt".format(
+            fileName = "AckRatio{}_{}_Method{}_data{}_alpha{}_Epoch{}_inject{}_dense{}_Agg{}_same_mask{}_noniid{}_maskthreshold{}_attack{}_endpoison{}_af{}.pt".format(
                 args.num_corrupt, args.num_agents, args.method, args.data, args.alpha, args.local_ep, args.poison_frac,
-                args.dense_ratio, args.aggr, args.se_threshold, args.non_iid, args.robustLR_threshold, args.attack,
-                args.cease_poison)
+                args.dense_ratio, args.aggr, args.same_mask, args.non_iid, args.theta, args.attack,
+                args.cease_poison, args.anneal_factor)
         fileHandler = logging.FileHandler("{0}/{1}.log".format(logPath, fileName))
         fileHandler.setFormatter(logFormatter)
         rootLogger.addHandler(fileHandler)
@@ -108,7 +108,7 @@ if __name__ == '__main__':
     neurotoxin_mask = {}
     updates_dict = {}
     n_model_params = len(parameters_to_vector([ global_model.state_dict()[name] for name in global_model.state_dict()]))
-    params = {name: copy.deepcopy(param) for name, param in global_model.named_parameters()}
+    params = {name: copy.deepcopy(global_model.state_dict()[name]) for name in global_model.state_dict()}
     if args.method == "lockdown":
         sparsity = utils.calculate_sparsities(args, params, distribution=args.mask_init)
         mask = utils.init_masks(params, sparsity)
@@ -121,7 +121,10 @@ if __name__ == '__main__':
                 agent = Agent(_id, args)
         else:
             if args.method == "lockdown":
-                agent = Agent_s(_id, args, train_dataset, user_groups[_id], mask=mask)
+                if args.same_mask==0:
+                    agent = Agent_s(_id, args, train_dataset, user_groups[_id], mask=utils.init_masks(params, sparsity))
+                else:
+                    agent = Agent_s(_id, args, train_dataset, user_groups[_id], mask=mask)
             else:
                 agent = Agent(_id, args, train_dataset, user_groups[_id])
         agent_data_sizes[_id] = agent.n_data
@@ -188,20 +191,7 @@ if __name__ == '__main__':
         # agent_updates_list.append(np.array(server_update.to("cpu")))
         worker_id_list.append(agent_id + 1)
 
-        # gradient = calculate_pca_of_gradients(agent_updates_list,2)
-        # plot_gradients_2d(zip(worker_id_list,gradient))
 
-        # vector_to_parameters(copy.deepcopy(rnd_global_params), global_model.parameters())
-        # update = agents[0].local_train(global_model, criterion, mask)
-        # agent_updates_dict[0] = update
-        # _, new_param = aggregator.aggregate_updates(global_model, agent_updates_dict, rnd)
-
-        # for agent_id in chosen:
-        #     if agent_id <  args.num_corrupt:
-        #         mask, recover_number = agents[agent_id].fire_mask(agent_updates_dict[agent_id], new_param - rnd_global_params, mask.to(args.device))
-        #         logging.info(torch.sum(mask))
-        #         mask = agents[agent_id].update_mask(agent_updates_dict[agent_id], new_param-rnd_global_params, mask, recover_number )
-        #         logging.info(torch.sum(mask))
 
         # inference in every args.snap rounds
         if rnd % args.snap == 0:
@@ -237,7 +227,7 @@ if __name__ == '__main__':
                 for name, param in test_model.named_parameters():
                     mask = 0
                     for id, agent in enumerate(agents):
-                        mask += old_mask[id][name]
+                        mask += old_mask[id][name].to(args.device)
                     param.data = torch.where(mask.to(args.device) >= args.theta, param,
                                              torch.zeros_like(param))
                     logging.info(torch.sum(mask.to(args.device) >= args.theta) / torch.numel(mask))
@@ -311,6 +301,7 @@ if __name__ == '__main__':
                     "asr_vec": asr_vec,
                     'pacc_vec ': pacc_vec,
                     "per_class_vec": per_class_vec,
+                    'neurotoxin_mask': neurotoxin_mask
                 }, PATH)
 
     # logging.info(mask_aggrement)

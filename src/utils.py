@@ -180,6 +180,7 @@ def distribute_data(dataset, args, n_classes=10):
                 dict_users[user_idx] += labels_dict[j][0]
                 del labels_dict[j % n_classes][0]
                 class_ctr += 1
+        np.random.shuffle(dict_users[user_idx])
     # num = [ [ 0 for k in range(n_classes) ] for i in range(args.num_agents)]
     # for k in range(n_classes):
     #     for i in dict_users:
@@ -408,7 +409,7 @@ def calculate_sparsities(args, params, tabu=[], distribution="ERK"):
             rhs = 0
             raw_probabilities = {}
             for name in params:
-                if name in tabu:
+                if name in tabu or "running" in name or "track" in name :
                     dense_layers.add(name)
                 n_param = np.prod(params[name].shape)
                 n_zeros = n_param * (1 - density)

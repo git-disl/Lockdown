@@ -13,10 +13,7 @@ def get_model(data):
 
         return resnet
     elif data == 'cifar100':
-        resnet = ResNet9(3,num_classes=100) 
-        # resnet =customized_resnet18(class_num=100)
-        # for name,param in resnet.named_parameters():
-        #     logging.info(name)
+        resnet = ResNet9(3,num_classes=100)
         return resnet
         # return CNN_CIFAR()
     elif data == 'tinyimagenet':
@@ -67,25 +64,49 @@ class SimpleCNNTinyImagenet(nn.Module):
         return x
 
 class CNN_MNIST(nn.Module):
-    def __init__(self):
-        super(CNN_MNIST, self).__init__()
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=(3,3),bias=False)
-        self.bn1 = nn.BatchNorm2d(32,track_running_stats=False)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=(3,3),bias=False)
-        self.bn2 = nn.BatchNorm2d(64,track_running_stats=False)
-        self.max_pool = nn.MaxPool2d(kernel_size=(2, 2))
-        self.fc1 = nn.Linear(1600, 128,bias=False)
-        self.fc2 = nn.Linear(128, 10,bias=False)
-        
-    def forward(self, x):
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = self.max_pool(x)
-        x = F.relu(self.bn2(self.conv2(x)))
-        x = self.max_pool(x)
-        x = x.view(-1, x.shape[1]*x.shape[2]*x.shape[3])
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x)
-        return x        
+	def __init__(self):
+		super (CNN_MNIST, self).__init__()
+
+		self.cnn1 = nn.Conv2d(in_channels = 1, out_channels = 32, kernel_size = 5, stride = 1, padding = 2)
+		self.relu1 = nn.ReLU()
+		self.norm1 = nn.BatchNorm2d(32,track_running_stats=False )
+		nn.init.xavier_uniform(self.cnn1.weight)
+
+		self.maxpool1 = nn.MaxPool2d(kernel_size=2)
+
+		self.cnn2 = nn.Conv2d(in_channels = 32, out_channels = 64, kernel_size = 3, stride = 1, padding = 2)
+		self.relu2 = nn.ReLU()
+		self.norm2 = nn.BatchNorm2d(64,track_running_stats=False)
+		nn.init.xavier_uniform(self.cnn2.weight)
+
+		self.maxpool2 = nn.MaxPool2d(kernel_size=2)
+
+		self.fc1 = nn.Linear(4096, 4096)
+		self.fcrelu = nn.ReLU()
+
+		self.fc2 = nn.Linear(4096, 10)
+
+	def forward(self, x):
+		out = self.cnn1(x)
+		out = self.relu1(out)
+		out = self.norm1(out)
+
+		out = self.maxpool1(out)
+
+		out = self.cnn2(out)
+		out = self.relu2(out)
+		out = self.norm2(out)
+
+		out = self.maxpool2(out)
+
+		out = out.view(out.size(0),-1)
+
+		out = self.fc1(out)
+		out = self.fcrelu(out)
+
+		out = self.fc2(out)
+		return out 
+     
 
 
 class CNN_CIFAR(nn.Module):
