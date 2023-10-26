@@ -40,7 +40,7 @@ def args_parser():
     parser.add_argument('--target_class', type=int, default=7,
                         help="target class for backdoor attack")
     
-    parser.add_argument('--poison_frac', type=float, default=0.5,
+    parser.add_argument('--poison_frac', type=float, default=0.01,
                         help="fraction of dataset to corrupt for backdoor attack")
     
     parser.add_argument('--pattern_type', type=str, default='plus',

@@ -335,7 +335,7 @@ def poison_dataset(dataset, args, data_idxs=None, poison_all=False, agent_idx=-1
             dataset.data[idx] = torch.tensor(bd_img)
         if modify_label:
             dataset.targets[idx] = args.target_class
-    return
+    return poison_idxs
 
 
 def init_masks(params, sparsities):
