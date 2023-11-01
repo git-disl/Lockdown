@@ -7,13 +7,11 @@ from agent import Agent
 from agent_sparse import Agent as Agent_s
 from options import args_parser
 from aggregation import Aggregation
-# from torch.utils.tensorboard import SummaryWriter
 import torch
 import random
 from torch.utils.data import DataLoader
 import torch.nn as nn
 from torch.nn.utils import parameters_to_vector
-
 import logging
 
 
@@ -26,9 +24,7 @@ if __name__ == '__main__':
     np.random.seed(0)
     random.seed(0)
     torch.backends.cudnn.deterministic = True
-
     args = args_parser()
-    args.server_lr = args.server_lr if args.aggr == 'sign' else 1.0
     logFormatter = logging.Formatter("%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s")
     rootLogger = logging.getLogger()
     rootLogger.setLevel(logging.DEBUG)
@@ -50,12 +46,6 @@ if __name__ == '__main__':
         fileHandler = logging.FileHandler("{0}/{1}.log".format(logPath, fileName))
         fileHandler.setFormatter(logFormatter)
         rootLogger.addHandler(fileHandler)
-
-    # sys.stderr.write = rootLogger.error
-    # sys.stdout.write = rootLogger.info
-    # consoleHandler = logging.StreamHandler(sys.stdout)
-    # consoleHandler.setFormatter(logFormatter)
-    # rootLogger.addHandler(consoleHandler)
     logging.info(args)
 
     cum_poison_acc_mean = 0
@@ -70,12 +60,10 @@ if __name__ == '__main__':
         num_target = 10
     val_loader = DataLoader(val_dataset, batch_size=args.bs, shuffle=False, num_workers=args.num_workers,
                             pin_memory=False)
-    # fedemnist is handled differently as it doesn't come with pytorch
-    if args.data != 'fedemnist':
-        if args.non_iid:
-            user_groups = utils.distribute_data_dirichlet(train_dataset, args)
-        else:
-            user_groups = utils.distribute_data(train_dataset, args, n_classes=num_target)
+    if args.non_iid:
+        user_groups = utils.distribute_data_dirichlet(train_dataset, args)
+    else:
+        user_groups = utils.distribute_data(train_dataset, args, n_classes=num_target)
         # print(user_groups)
     idxs = (val_dataset.targets != args.target_class).nonzero().flatten().tolist()
     # logging.info(idxs)
@@ -88,9 +76,6 @@ if __name__ == '__main__':
 
     poisoned_val_loader = DataLoader(poisoned_val_set, batch_size=args.bs, shuffle=False, num_workers=args.num_workers,
                                      pin_memory=False)
-
-    # poison the validation dataset
-    # logging.info(idxs)
     if args.data != "tinyimagenet":
         idxs = (val_dataset.targets != args.target_class).nonzero().flatten().tolist()
         poisoned_val_set_only_x = utils.DatasetSplit(copy.deepcopy(val_dataset), idxs)
@@ -114,19 +99,13 @@ if __name__ == '__main__':
         mask = utils.init_masks(params, sparsity)
     agents, agent_data_sizes = [], {}
     for _id in range(0, args.num_agents):
-        if args.data == 'fedemnist':
-            if args.method == "lockdown":
-                agent = Agent_s(_id, args, mask=mask)
+        if args.method == "lockdown":
+            if args.same_mask==0:
+                agent = Agent_s(_id, args, train_dataset, user_groups[_id], mask=utils.init_masks(params, sparsity))
             else:
-                agent = Agent(_id, args)
+                agent = Agent_s(_id, args, train_dataset, user_groups[_id], mask=mask)
         else:
-            if args.method == "lockdown":
-                if args.same_mask==0:
-                    agent = Agent_s(_id, args, train_dataset, user_groups[_id], mask=utils.init_masks(params, sparsity))
-                else:
-                    agent = Agent_s(_id, args, train_dataset, user_groups[_id], mask=mask)
-            else:
-                agent = Agent(_id, args, train_dataset, user_groups[_id])
+            agent = Agent(_id, args, train_dataset, user_groups[_id])
         agent_data_sizes[_id] = agent.n_data
         agents.append(agent)
 
@@ -134,15 +113,6 @@ if __name__ == '__main__':
 
     aggregator = Aggregation(agent_data_sizes, n_model_params, poisoned_val_loader, args, None)
     criterion = nn.CrossEntropyLoss().to(args.device)
-
-    # mask = { name: torch.ones(param)   for name, param in global_model.named_parameters() }
-
-    # training loop
-    # for name in torch
-
-    # mask [:int(0.01*n_model_params)] =1
-    # mask = torch.ones( n_model_params)
-    server_update = torch.zeros_like(parameters_to_vector(global_model.parameters()).detach())
     agent_updates_list = []
     worker_id_list = []
     agent_updates_dict = {}
@@ -159,12 +129,9 @@ if __name__ == '__main__':
     clean_per_class_vec = []
 
     for rnd in range(1, args.rounds + 1):
-
         logging.info("--------round {} ------------".format(rnd))
         # mask = torch.ones(n_model_params)
         rnd_global_params = parameters_to_vector([ copy.deepcopy(global_model.state_dict()[name]) for name in global_model.state_dict()])
-
-        # agent_updates_dict_prev = copy.deepcopy(agent_updates_dict)
         agent_updates_dict = {}
         chosen = np.random.choice(args.num_agents, math.floor(args.num_agents * args.agent_frac), replace=False)
         if args.method == "lockdown" or args.method == "fedimp":
@@ -172,7 +139,7 @@ if __name__ == '__main__':
         for agent_id in chosen:
             # logging.info(torch.sum(rnd_global_params))
             global_model = global_model.to(args.device)
-            if args.method == "lockdown" or args.method == "fedimp":
+            if args.method == "lockdown":
                 update = agents[agent_id].local_train(global_model, criterion, rnd, global_mask=global_mask, neurotoxin_mask = neurotoxin_mask, updates_dict=updates_dict)
             else:
                 update = agents[agent_id].local_train(global_model, criterion, rnd, neurotoxin_mask=neurotoxin_mask)
@@ -180,15 +147,10 @@ if __name__ == '__main__':
             utils.vector_to_model(copy.deepcopy(rnd_global_params), global_model)
 
         # aggregate params obtained by agents and update the global params
-        if args.method == "lockdown" or args.method == "fedimp":
-            _, _, updates_dict,neurotoxin_mask = aggregator.aggregate_updates(global_model, agent_updates_dict, rnd, masks=old_mask,
-                                                   agent_updates_dict_prev=None,
-                                                   mask_aggrement=mask_aggrement)
+        if args.method == "lockdown":
+            updates_dict,neurotoxin_mask = aggregator.aggregate_updates(global_model, agent_updates_dict)
         else:
-            _, _, updates_dict,neurotoxin_mask = aggregator.aggregate_updates(global_model, agent_updates_dict, rnd,
-                                                   agent_updates_dict_prev=None,
-                                                   mask_aggrement=mask_aggrement)
-        # agent_updates_list.append(np.array(server_update.to("cpu")))
+            updates_dict,neurotoxin_mask = aggregator.aggregate_updates(global_model, agent_updates_dict)
         worker_id_list.append(agent_id + 1)
 
 
@@ -197,12 +159,11 @@ if __name__ == '__main__':
         if rnd % args.snap == 0:
             val_loss, (val_acc, val_per_class_acc), _ = utils.get_loss_n_accuracy(global_model, criterion, val_loader,
                                                                                   args, rnd, num_target)
-            # writer.add_scalar('Validation/Loss', val_loss, rnd)
-            # writer.add_scalar('Validation/Accuracy', val_acc, rnd)
             logging.info(f'| Val_Loss/Val_Acc: {val_loss:.3f} / {val_acc:.3f} |')
             logging.info(f'| Val_Per_Class_Acc: {val_per_class_acc} ')
             acc_vec.append(val_acc)
             per_class_vec.append(val_per_class_acc)
+
 
             poison_loss, (asr, _), fail_samples = utils.get_loss_n_accuracy(global_model, criterion,
                                                                             poisoned_val_loader, args, rnd, num_target)
@@ -216,13 +177,7 @@ if __name__ == '__main__':
             pacc_vec.append(poison_acc)
             logging.info(f'| Poison Loss/Poison accuracy: {poison_loss:.3f} / {poison_acc:.3f} |')
 
-            # plt.imshow(np.transpose(fail_samples[0].to("cpu"), (1, 2, 0)))
-            # plt.show()
-            # plt.imshow(np.transpose(fail_samples[1].to("cpu"), (1, 2, 0)))
-            # plt.show()
-            # plt.imshow(np.transpose(fail_samples[2].to("cpu"), (1, 2, 0)))
-            # plt.show()
-            if args.method == "lockdown" or args.method == "fedimp":
+            if args.method == "lockdown" :
                 test_model = copy.deepcopy(global_model)
                 for name, param in test_model.named_parameters():
                     mask = 0
@@ -246,10 +201,6 @@ if __name__ == '__main__':
                                                                             args, rnd, num_target)
                 clean_asr_vec.append(poison_acc)
                 cum_poison_acc_mean += poison_acc
-                # writer.add_scalar('Clean Poison/Base_Class_Accuracy', val_per_class_acc[args.base_class], rnd)
-                # writer.add_scalar('Clean Poison/Poison_Accuracy', poison_acc, rnd)
-                # writer.add_scalar('Clean Poison/Poison_Loss', poison_loss, rnd)
-                # writer.add_scalar('Clean Poison/Cumulative_Poison_Accuracy_Mean', cum_poison_acc_mean / rnd, rnd)
                 logging.info(f'| Clean Attack Success Ratio: {poison_loss:.3f} / {poison_acc:.3f} |')
 
                 poison_loss, (poison_acc, _), fail_samples = utils.get_loss_n_accuracy(test_model, criterion,
@@ -259,10 +210,8 @@ if __name__ == '__main__':
                 logging.info(f'| Clean Poison Loss/Clean Poison accuracy: {poison_loss:.3f} / {poison_acc:.3f} |')
                 # ask the guys to finetune the classifier
                 del test_model
-        if args.data != "fedemnist":
-            save_frequency = 25
-        else:
-            save_frequency = 100
+
+        save_frequency = 25
         if rnd % save_frequency == 0:
             if args.mask_init == "uniform":
                 PATH = "checkpoint/uniform_AckRatio{}_{}_Method{}_data{}_alpha{}_Rnd{}_Epoch{}_inject{}_dense{}_Agg{}_se_threshold{}_noniid{}_maskthreshold{}_attack{}.pt".format(
@@ -304,5 +253,4 @@ if __name__ == '__main__':
                     'neurotoxin_mask': neurotoxin_mask
                 }, PATH)
 
-    # logging.info(mask_aggrement)
     logging.info('Training has finished!')

@@ -1,15 +1,11 @@
 import copy
 import math
-import time
-
 import torch
-import models
 import utils
-from torch.nn.utils import parameters_to_vector, vector_to_parameters
+from torch.nn.utils import parameters_to_vector
 from torch.utils.data import DataLoader
 import torch.nn as nn
 import numpy as np
-import torch.nn.functional as F
 import logging
 
 class Agent():
@@ -17,25 +13,15 @@ class Agent():
         self.id = id
         self.args = args
         self.error = 0
-        # get datasets, fedemnist is handled differently as it doesn't come with pytorch
-        if train_dataset is None:
-            self.train_dataset = torch.load(f'../data/Fed_EMNIST/user_trainsets/user_{id}_trainset.pt')
-
-            # for backdoor attack, agent poisons his local dataset
+        # poisoned datasets, tinyimagenet is handled differently as the dataset is not loaded into memory
+        if self.args.data != "tinyimagenet":
+            self.train_dataset = utils.DatasetSplit(train_dataset, data_idxs)
             if self.id < args.num_corrupt:
-                utils.poison_dataset(self.train_dataset, args, data_idxs, agent_idx=self.id)
-
+                self.clean_backup_dataset = copy.deepcopy(train_dataset)
+                self.data_idxs = data_idxs
+                utils.poison_dataset(train_dataset, args, data_idxs, agent_idx=self.id)
         else:
-            if self.args.data != "tinyimagenet":
-                
-                self.train_dataset = utils.DatasetSplit(train_dataset, data_idxs)
-                # for backdoor attack, agent poisons his local dataset
-                if self.id < args.num_corrupt:
-                    self.clean_backup_dataset = copy.deepcopy(train_dataset)
-                    self.data_idxs = data_idxs
-                    utils.poison_dataset(train_dataset, args, data_idxs, agent_idx=self.id)
-            else:
-                self.train_dataset = utils.DatasetSplit(train_dataset, data_idxs, runtime_poison=True, args=args,
+            self.train_dataset = utils.DatasetSplit(train_dataset, data_idxs, runtime_poison=True, args=args,
                                                         client_id=id)
 
         # get dataloader
@@ -131,9 +117,7 @@ class Agent():
                 self.mask = self.update_mask(self.mask, self.num_remove, gradient)
         
         global_model.train()
-        # print(torch.sum(initial_global_model_params))
         lr = self.args.client_lr* (self.args.lr_decay)**round
-        # logging.info(lr)
         optimizer = torch.optim.SGD(global_model.parameters(), lr=lr, weight_decay=self.args.wd)
 
         for _ in range(self.args.local_ep):
@@ -166,10 +150,6 @@ class Agent():
                     self.mask = neurotoxin_mask
                 else:
                     self.mask = self.mask
-            elif self.args.attack == "snooper":
-                if len(updates_dict):
-                    self.mask, self.num_remove = self.fire_mask(updates_dict , self.mask, round)
-
             else:
                 self.mask, self.num_remove = self.fire_mask(global_model.state_dict(), self.mask, round)
 

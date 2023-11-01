@@ -25,7 +25,7 @@ python federated.py  --method lockdown
 You can also find script in directory `src/script`.
 
 ### Files organization
-* The main simulation program is in `decentralized.py`, where we initialize the benign and poison dataset, call clients to do local training, call aggregator to do aggregation, do consensus fusion before testing, etc.
+* The main simulation program is in `federated.py`, where we initialize the benign and poison dataset, call clients to do local training, call aggregator to do aggregation, do consensus fusion before testing, etc.
 
 * The Lockdown's client local training logistic is in `agent_sparse.py`. 
 
