@@ -74,7 +74,7 @@ class Agent():
                 optimizer.step()
 
             end = time.time()
-            logging.info(end - start)
+            # logging.info(end - start)
 
         with torch.no_grad():
             after_train = parameters_to_vector(
