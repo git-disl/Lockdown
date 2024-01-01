@@ -74,12 +74,12 @@ class Agent():
                 masks[name].view(-1)[idx[:num_remove[name]]] = 1
         return masks
     
-    def init_mask(self,  gradient=None):
-        for name in self.mask:
-            num_init = torch.count_nonzero(self.mask[name])
-            self.mask[name] = torch.zeros_like(self.mask[name])
-            sort_temp, idx = torch.sort(torch.abs(gradient[name]).view(-1), descending=True)
-            self.mask[name].view(-1)[idx[:num_init]] = 1
+    # def init_mask(self,  gradient=None):
+    #     for name in self.mask:
+    #         num_init = torch.count_nonzero(self.mask[name])
+    #         self.mask[name] = torch.zeros_like(self.mask[name])
+    #         sort_temp, idx = torch.sort(torch.abs(gradient[name]).view(-1), descending=True)
+    #         self.mask[name].view(-1)[idx[:num_init]] = 1
              
 
     def fire_mask(self, weights, masks, round):
